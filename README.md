@@ -46,6 +46,15 @@ dotnet run --project src/GbfsQuiz.Web
 The launch profile serves the UI and API on the same origin; open the printed
 `http://localhost:<port>` URL.
 
+> **Secrets:** the JWT signing key and DB connection string are **not** in
+> `appsettings.json`. Out of the box the app falls back to a dev-only signing key and a
+> `localhost`/`postgres` connection (matching the Docker `db`). To use your own, set them
+> via [.NET user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets):
+> ```bash
+> dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;..." --project src/GbfsQuiz.Web
+> dotnet user-secrets set "Jwt:SigningKey" "<a 32+ char key>" --project src/GbfsQuiz.Web
+> ```
+
 ### Run the tests
 
 ```bash
