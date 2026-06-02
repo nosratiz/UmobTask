@@ -21,6 +21,7 @@ public sealed class GameService(IGameSessionRepository repository, IQuizService 
         }
 
         var session = new GameSession(playerId);
+        session.IssueQuestion(question.Value.Id);
         await repository.CreateAsync(session, ct);
 
         var endsAt = session.StartedAtUtc.AddSeconds(GameSession.SessionDurationSeconds);
@@ -76,6 +77,15 @@ public sealed class GameService(IGameSessionRepository repository, IQuizService 
     private async Task<Result<AnswerResultResponse>> GradeAsync(
         GameSession session, Guid questionId, Guid choiceId, CancellationToken ct)
     {
+        // Only the session's current outstanding question may be answered. This — together
+        // with the single-use IIssuedQuestionStore — blocks replaying an answered question
+        // (or submitting a foreign one) to farm points.
+        if (!session.IsCurrentQuestion(questionId))
+        {
+            return Result.Fail<AnswerResultResponse>(
+                new ConflictError("That question is not the active question for this game."));
+        }
+
         var grade = quiz.Grade(questionId, choiceId);
         if (grade.IsFailed)
         {
@@ -88,8 +98,20 @@ public sealed class GameService(IGameSessionRepository repository, IQuizService 
             session.Complete();
         }
 
+        // Issue the next question (when the game continues) and persist it together with the
+        // score change in a single write, so the new CurrentQuestionId is durable and the
+        // just-answered id is gone.
+        var next = await NextQuestionOrNullAsync(session, ct);
         await repository.UpdateAsync(session, ct);
-        return Result.Ok(await BuildResultAsync(session, grade.Value, ct));
+
+        return Result.Ok(new AnswerResultResponse(
+            grade.Value.Correct,
+            grade.Value.CorrectChoiceId,
+            session.Score,
+            SecondsRemaining(session),
+            session.Outcome != GameOutcome.InProgress,
+            session.Outcome.ToString(),
+            next));
     }
 
     private async Task<Result<AnswerResultResponse>> ExpireAsync(GameSession session, CancellationToken ct)
@@ -100,20 +122,6 @@ public sealed class GameService(IGameSessionRepository repository, IQuizService 
             false, CorrectChoiceId: null, session.Score, 0, true, session.Outcome.ToString(), NextQuestion: null));
     }
 
-    private async Task<AnswerResultResponse> BuildResultAsync(
-        GameSession session, GradeResult grade, CancellationToken ct)
-    {
-        var next = await NextQuestionOrNullAsync(session, ct);
-        return new AnswerResultResponse(
-            grade.Correct,
-            grade.CorrectChoiceId,
-            session.Score,
-            SecondsRemaining(session),
-            session.Outcome != GameOutcome.InProgress,
-            session.Outcome.ToString(),
-            next);
-    }
-
     private async Task<QuestionResponse?> NextQuestionOrNullAsync(GameSession session, CancellationToken ct)
     {
         if (session.Outcome != GameOutcome.InProgress)
@@ -122,7 +130,13 @@ public sealed class GameService(IGameSessionRepository repository, IQuizService 
         }
 
         var question = await quiz.NextQuestionAsync(ct);
-        return question.IsSuccess ? question.Value.ToResponse() : null;
+        if (question.IsFailed)
+        {
+            return null;
+        }
+
+        session.IssueQuestion(question.Value.Id);
+        return question.Value.ToResponse();
     }
 
     private static bool IsExpired(GameSession session) =>

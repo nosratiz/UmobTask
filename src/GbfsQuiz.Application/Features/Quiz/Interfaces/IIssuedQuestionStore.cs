@@ -10,5 +10,10 @@ public interface IIssuedQuestionStore
 {
     void Remember(QuizQuestion question);
 
-    bool TryGetCorrectChoice(Guid questionId, out Guid correctChoiceId);
+    /// <summary>
+    /// Atomically looks up and <b>removes</b> the correct choice for a question. A question
+    /// can be graded exactly once: a second (or concurrent) call returns <c>false</c>. This
+    /// is what prevents answer-replay / score farming.
+    /// </summary>
+    bool TryConsumeCorrectChoice(Guid questionId, out Guid correctChoiceId);
 }

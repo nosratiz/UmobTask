@@ -1,4 +1,5 @@
 using FluentValidation;
+using Microsoft.AspNetCore.HttpOverrides;
 using GbfsQuiz.Web.Common.Middleware;
 using GbfsQuiz.Web.Common.Security;
 using GbfsQuiz.Web.Common.Startup;
@@ -22,6 +23,16 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .Enrich.FromLogContext()
     .WriteTo.Console());
 
+// Behind Render's reverse proxy: trust X-Forwarded-For/-Proto so RemoteIpAddress (used by
+// the IP-partitioned rate limiters) and the request scheme reflect the real client. The
+// proxy IP isn't fixed on a PaaS, so the default known-network/proxy allow-list is cleared.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddOpenApi();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -41,6 +52,10 @@ builder.Services.AddScoped<IAvatarStorage, FileSystemAvatarStorage>();
 var app = builder.Build();
 
 await app.MigrateDatabaseAsync();
+
+// Must run first so downstream middleware (logging, rate limiting, HTTPS) sees the real
+// client IP and scheme from the proxy rather than the proxy's own.
+app.UseForwardedHeaders();
 
 // Pipeline: log -> catch -> harden, before routing/auth.
 app.UseRequestLogging();

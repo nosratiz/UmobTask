@@ -30,7 +30,7 @@ public sealed class QuizService(
     }
 
     public Result<GradeResult> Grade(Guid questionId, Guid choiceId) =>
-        store.TryGetCorrectChoice(questionId, out var correct)
+        store.TryConsumeCorrectChoice(questionId, out var correct)
             ? Result.Ok(new GradeResult(choiceId == correct, correct))
             : Result.Fail<GradeResult>(new NotFoundError("That question is no longer active."));
 

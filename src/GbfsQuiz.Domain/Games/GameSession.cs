@@ -33,12 +33,35 @@ public sealed class GameSession : Entity
     public DateTimeOffset StartedAtUtc { get; private set; }
     public DateTimeOffset? EndedAtUtc { get; private set; }
 
+    /// <summary>
+    /// The id of the question the player may currently answer. Only this id is accepted by
+    /// <see cref="RecordAnswer"/>, so a client cannot replay an already-answered question
+    /// (or submit a foreign one) to farm points.
+    /// </summary>
+    public Guid? CurrentQuestionId { get; private set; }
+
     /// <summary>Flexible, provider-specific context persisted as PostgreSQL JSONB.</summary>
     public Dictionary<string, string> Metadata { get; private set; } = new();
+
+    /// <summary>Marks <paramref name="questionId"/> as the one outstanding answerable question.</summary>
+    public void IssueQuestion(Guid questionId)
+    {
+        ThrowIfNotInProgress();
+        ArgumentOutOfRangeException.ThrowIfEqual(questionId, Guid.Empty);
+        CurrentQuestionId = questionId;
+    }
+
+    /// <summary>True when <paramref name="questionId"/> is the session's current outstanding question.</summary>
+    public bool IsCurrentQuestion(Guid questionId) =>
+        CurrentQuestionId is { } current && current == questionId;
 
     public void RecordAnswer(bool isCorrect)
     {
         ThrowIfNotInProgress();
+
+        // Consume the outstanding question so the same id can never be scored twice.
+        CurrentQuestionId = null;
+
         if (isCorrect)
         {
             Score += CorrectAnswerPoints;

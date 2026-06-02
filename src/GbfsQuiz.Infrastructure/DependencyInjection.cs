@@ -60,10 +60,19 @@ public static class DependencyInjection
 
         var options = configuration.GetSection(GbfsOptions.SectionName).Get<GbfsOptions>() ?? new GbfsOptions();
 
+        var perAttempt = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        // The whole operation (all retries + back-off) gets one budget. Per-attempt × attempts
+        // plus a small allowance for the back-off delays between them.
+        var totalTimeout = perAttempt * (options.RetryCount + 1) + TimeSpan.FromSeconds(5);
+
         services.AddScoped<IGbfsClient, GbfsClient>();
         services.AddHttpClient(GbfsClient.ClientName, http =>
         {
-            http.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+            // Let the resilience pipeline own all timeouts. HttpClient.Timeout is a single
+            // budget for the entire send (including retries), so leaving it at the default
+            // 100s — or worse, the per-attempt value — would cancel the retries before they
+            // can run. InfiniteTimeSpan hands timing control to the strategies below.
+            http.Timeout = Timeout.InfiniteTimeSpan;
             http.DefaultRequestHeaders.Add("User-Agent", "GbfsQuiz/1.0");
         })
         // Polly v8 resilience: retry transient GBFS failures (5xx, 408, network errors,
@@ -71,6 +80,9 @@ public static class DependencyInjection
         // handled gracefully by CachedGbfsSnapshotProvider; this just smooths over blips.
         .AddResilienceHandler("gbfs", builder =>
         {
+            // Outermost: a hard ceiling on the whole retried operation.
+            builder.AddTimeout(totalTimeout);
+
             builder.AddRetry(new HttpRetryStrategyOptions
             {
                 MaxRetryAttempts = options.RetryCount,
@@ -81,8 +93,8 @@ public static class DependencyInjection
                     HttpClientResiliencePredicates.IsTransient(args.Outcome))
             });
 
-            // Cap a single attempt so a hung connection can't consume the whole HttpClient timeout.
-            builder.AddTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds));
+            // Innermost: cap a single attempt so a hung connection can't stall the pipeline.
+            builder.AddTimeout(perAttempt);
         });
     }
 

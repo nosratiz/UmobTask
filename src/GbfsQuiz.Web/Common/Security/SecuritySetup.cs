@@ -37,17 +37,37 @@ public static class SecuritySetup
         services.AddRateLimiter(limiter =>
         {
             limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            limiter.AddFixedWindowLimiter("auth", o => Configure(o, permit: 10));
-            limiter.AddFixedWindowLimiter("game", o => Configure(o, permit: 120));
-            limiter.AddFixedWindowLimiter("public", o => Configure(o, permit: 60));
+
+            // Each policy is PARTITIONED so the limit applies per client, not as one global
+            // bucket shared by everyone. "game" is keyed by the authenticated player id (so
+            // one player can't throttle the rest); "auth"/"public" are pre-auth, so they key
+            // by client IP (requires UseForwardedHeaders behind the reverse proxy).
+            limiter.AddPolicy("auth", ctx => PerClientIp(ctx, permit: 10));
+            limiter.AddPolicy("game", ctx => PerPlayer(ctx, permit: 120));
+            limiter.AddPolicy("public", ctx => PerClientIp(ctx, permit: 60));
         });
         return services;
     }
 
-    private static void Configure(FixedWindowRateLimiterOptions options, int permit)
+    private static RateLimitPartition<string> PerPlayer(HttpContext ctx, int permit)
     {
-        options.PermitLimit = permit;
-        options.Window = TimeSpan.FromMinutes(1);
-        options.QueueLimit = 0;
+        var key = ctx.User.TryGetId(out var playerId)
+            ? $"player:{playerId}"
+            : $"ip:{ClientIp(ctx)}"; // fall back to IP if somehow unauthenticated
+        return Window(key, permit);
     }
+
+    private static RateLimitPartition<string> PerClientIp(HttpContext ctx, int permit) =>
+        Window($"ip:{ClientIp(ctx)}", permit);
+
+    private static string ClientIp(HttpContext ctx) =>
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    private static RateLimitPartition<string> Window(string key, int permit) =>
+        RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permit,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
 }

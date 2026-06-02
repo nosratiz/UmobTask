@@ -31,6 +31,7 @@ public sealed class GameSessionConfiguration : IEntityTypeConfiguration<GameSess
         builder.Property(x => x.Outcome).HasColumnName("outcome").HasConversion<string>().IsRequired();
         builder.Property(x => x.StartedAtUtc).HasColumnName("started_at_utc").IsRequired();
         builder.Property(x => x.EndedAtUtc).HasColumnName("ended_at_utc");
+        builder.Property(x => x.CurrentQuestionId).HasColumnName("current_question_id");
         builder.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
 
         ConfigureJsonbMetadata(builder);

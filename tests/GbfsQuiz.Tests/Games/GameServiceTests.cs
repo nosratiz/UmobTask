@@ -57,6 +57,8 @@ public sealed class GameServiceTests
     public async Task SubmitAnswerAsync_CorrectAnswer_IncreasesScoreAndReturnsNext()
     {
         var session = new GameSession(_playerId);
+        var questionId = Guid.CreateVersion7();
+        session.IssueQuestion(questionId); // this is the active question for the session
         _repo.Setup(r => r.GetForPlayerAsync(It.IsAny<Guid>(), _playerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
         _quiz.Setup(q => q.Grade(It.IsAny<Guid>(), It.IsAny<Guid>()))
@@ -64,12 +66,30 @@ public sealed class GameServiceTests
         QuizReturnsQuestion();
 
         var result = await CreateService().SubmitAnswerAsync(
-            _playerId, session.Id, Guid.CreateVersion7(), Guid.CreateVersion7());
+            _playerId, session.Id, questionId, Guid.CreateVersion7());
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Correct.Should().BeTrue();
         result.Value.Score.Should().Be(50);
         result.Value.NextQuestion.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SubmitAnswerAsync_ForQuestionThatIsNotTheActiveOne_IsRejected()
+    {
+        // Replay / farming guard: the session's current question is A, but the client
+        // submits some other id B. It must be refused before any grading happens.
+        var session = new GameSession(_playerId);
+        session.IssueQuestion(Guid.CreateVersion7());
+        _repo.Setup(r => r.GetForPlayerAsync(It.IsAny<Guid>(), _playerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(session);
+
+        var result = await CreateService().SubmitAnswerAsync(
+            _playerId, session.Id, Guid.CreateVersion7(), Guid.CreateVersion7());
+
+        result.IsFailed.Should().BeTrue();
+        _quiz.Verify(q => q.Grade(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never); // never graded
+        _repo.Verify(r => r.UpdateAsync(It.IsAny<GameSession>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

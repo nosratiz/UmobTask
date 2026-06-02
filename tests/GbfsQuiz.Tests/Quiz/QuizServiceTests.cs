@@ -46,18 +46,40 @@ public sealed class QuizServiceTests
     }
 
     [Fact]
-    public async Task Grade_AfterIssuingQuestion_ScoresCorrectChoiceAsCorrect()
+    public async Task Grade_CorrectChoice_ScoresAsCorrect()
     {
         GivenSnapshots(SnapshotBuilder.Snapshot("a", "Alpha", 30));
         var service = CreateService();
         var question = (await service.NextQuestionAsync()).Value;
 
         var correct = service.Grade(question.Id, question.CorrectChoiceId).Value;
+
         correct.Correct.Should().BeTrue();
         correct.CorrectChoiceId.Should().Be(question.CorrectChoiceId);
+    }
 
+    [Fact]
+    public async Task Grade_WrongChoice_ScoresAsIncorrect()
+    {
+        GivenSnapshots(SnapshotBuilder.Snapshot("a", "Alpha", 30));
+        var service = CreateService();
+        var question = (await service.NextQuestionAsync()).Value;
         var wrong = question.Choices.First(c => c.Id != question.CorrectChoiceId).Id;
+
         service.Grade(question.Id, wrong).Value.Correct.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Grade_SameQuestionTwice_FailsSecondTime_PreventingReplay()
+    {
+        GivenSnapshots(SnapshotBuilder.Snapshot("a", "Alpha", 30));
+        var service = CreateService();
+        var question = (await service.NextQuestionAsync()).Value;
+
+        service.Grade(question.Id, question.CorrectChoiceId).IsSuccess.Should().BeTrue();
+
+        // A question is single-use: regrading it (the score-farming vector) must fail.
+        service.Grade(question.Id, question.CorrectChoiceId).IsFailed.Should().BeTrue();
     }
 
     [Fact]
