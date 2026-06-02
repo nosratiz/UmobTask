@@ -1,0 +1,426 @@
+@page "/"
+@implements IDisposable
+@inject IGameService Games
+@inject IAvatarService Avatars
+@inject PlayerSession Session
+@inject ProtectedLocalStorage Storage
+@inject IJSRuntime JS
+
+<PageTitle>GBFS Quiz</PageTitle>
+
+@switch (_view)
+{
+    case View.Loading:
+        <div class="d-flex justify-center mt-16">
+            <MudProgressCircular Indeterminate="true" />
+        </div>
+        break;
+
+    case View.Auth:
+        <AuthCard OnAuthenticated="EnterLobby" />
+        break;
+
+    case View.Lobby:
+        <MudPaper Class="pa-4 mb-4 d-flex align-center gap-4" Elevation="2">
+            <MudAvatar Size="Size.Large" Color="Color.Primary">
+                @if (_avatarUrl is not null)
+                {
+                    <MudImage Src="@_avatarUrl" />
+                }
+                else
+                {
+                    @ProfileInitial
+                }
+            </MudAvatar>
+            <div class="flex-grow-1">
+                <MudText Typo="Typo.h6">@Session.DisplayName</MudText>
+                <MudButton HtmlTag="label" for="avatarInput" Variant="Variant.Text" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.PhotoCamera">Upload avatar</MudButton>
+                <InputFile id="avatarInput" OnChange="UploadAvatar" accept="image/*" style="display:none" />
+            </div>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                       Disabled="@(_history is null || _history.Count == 0)" OnClick="ExportHistory">
+                Export CSV
+            </MudButton>
+        </MudPaper>
+
+        <MudCard Elevation="4">
+            <MudCardContent>
+                <MudText Typo="Typo.h5" GutterBottom="true">Ready?</MudText>
+                <MudText>
+                    You have <strong>60 seconds</strong>. Correct answer <strong>+50</strong>,
+                    wrong answer <strong>−20</strong>. Keep your balance positive to win.
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           FullWidth="true" Class="mt-4" Disabled="_busy" OnClick="StartGame">
+                    @if (_busy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                    else { <text>Start game</text> }
+                </MudButton>
+            </MudCardContent>
+        </MudCard>
+
+        <MudText Typo="Typo.h6" Class="mt-8 mb-2">Your history</MudText>
+        @if (_history is null)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Default">Could not load history.</MudText>
+        }
+        else if (_history.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Default">No games yet — play your first!</MudText>
+        }
+        else
+        {
+            <MudList T="GameSummaryResponse" Dense="true">
+                @foreach (var g in _history)
+                {
+                    <MudListItem T="GameSummaryResponse">
+                        <div class="d-flex justify-space-between align-center" style="width:100%">
+                            <MudText Typo="Typo.body2">@g.StartedAtUtc.ToLocalTime().ToString("g")</MudText>
+                            <MudText Typo="Typo.body2">@g.CorrectAnswers✓ / @g.WrongAnswers✗</MudText>
+                            <div class="d-flex align-center gap-2">
+                                <MudText Typo="Typo.body1"><strong>@g.Score</strong></MudText>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(g.Outcome == "Won" ? Color.Success : Color.Error)">@g.Outcome</MudChip>
+                            </div>
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+
+        <Leaderboard />
+        break;
+
+    case View.Game:
+        <MudCard Elevation="4">
+            <MudCardContent>
+                <div class="d-flex justify-space-between mb-2">
+                    <MudText Typo="Typo.h6">Time <span style="color:var(--mud-palette-primary)">@_secondsRemaining</span>s</MudText>
+                    <MudText Typo="Typo.h6">Score <span style="color:var(--mud-palette-primary)">@_score</span></MudText>
+                </div>
+                <MudProgressLinear Color="Color.Secondary" Rounded="true"
+                                   Value="@(_secondsRemaining / 60.0 * 100)" Class="mb-4" />
+
+                @if (_question is { } question)
+                {
+                    <MudText Typo="Typo.overline" Color="Color.Primary">@question.Category</MudText>
+                    <MudText Typo="Typo.h6" Class="mb-4">@question.Text</MudText>
+
+                    <div class="d-flex flex-column gap-2">
+                        @foreach (var choice in question.Choices)
+                        {
+                            <MudButton Variant="@ChoiceVariant(choice.Id)" Color="@ChoiceColor(choice.Id)"
+                                       FullWidth="true" Style="justify-content:flex-start;text-transform:none"
+                                       Disabled="_answered" OnClick="@(() => SubmitAnswer(choice.Id))">
+                                @choice.Text
+                            </MudButton>
+                        }
+                    </div>
+                }
+
+                @if (_feedback is not null)
+                {
+                    <MudText Typo="Typo.body1" Class="mt-4"
+                             Color="@(_lastCorrect ? Color.Success : Color.Error)">@_feedback</MudText>
+                }
+            </MudCardContent>
+        </MudCard>
+        break;
+
+    case View.Result:
+        <MudCard Elevation="4">
+            <MudCardContent Class="text-center">
+                <MudText Typo="Typo.h4" GutterBottom="true">
+                    @(_summary!.Outcome == "Won" ? "🎉 You won!" : "💥 You lost")
+                </MudText>
+                <MudText Typo="Typo.h6">Final score: <strong>@_summary!.Score</strong></MudText>
+                <MudText Class="mt-2">@_summary!.CorrectAnswers correct, @_summary.WrongAnswers wrong.</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           FullWidth="true" Class="mt-6" OnClick="EnterLobby">Play again</MudButton>
+            </MudCardContent>
+        </MudCard>
+
+        <Leaderboard />
+        break;
+}
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <MudAlert Severity="Severity.Error" Class="mt-4" Dense="true">@_error</MudAlert>
+}
+
+@code {
+    private enum View { Loading, Auth, Lobby, Game, Result }
+
+    private View _view = View.Loading;
+    private string? _error;
+    private bool _busy;
+
+    // Lobby
+    private IReadOnlyList<GameSummaryResponse>? _history = Array.Empty<GameSummaryResponse>();
+
+    // Active game
+    private Guid _gameId;
+    private DateTimeOffset _endsAt;
+    private int _score;
+    private int _secondsRemaining = 60;
+    private QuestionResponse? _question;
+    private System.Timers.Timer? _timer;
+
+    // Per-question answer feedback
+    private bool _answered;
+    private bool _lastCorrect;
+    private Guid? _answeredChoiceId;
+    private Guid? _correctChoiceId;
+    private string? _feedback;
+    private bool _finishing;
+
+    protected override void OnInitialized() => Session.Changed += OnSessionChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) { return; }
+
+        if (!Session.IsAuthenticated)
+        {
+            var stored = await TryLoadStoredSession();
+            if (stored is not null)
+            {
+                Session.SignIn(stored.PlayerId, stored.DisplayName);
+            }
+        }
+
+        if (Session.IsAuthenticated)
+        {
+            await EnterLobby();
+        }
+        else
+        {
+            _view = View.Auth;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<StoredSession?> TryLoadStoredSession()
+    {
+        try
+        {
+            var result = await Storage.GetAsync<StoredSession>("gbfs_session");
+            return result is { Success: true, Value: not null } ? result.Value : null;
+        }
+        catch
+        {
+            return null; // Undecryptable/old payload — treat as signed out.
+        }
+    }
+
+    private void OnSessionChanged()
+    {
+        if (!Session.IsAuthenticated)
+        {
+            StopTimer();
+            _view = View.Auth;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task EnterLobby()
+    {
+        StopTimer();
+        _error = null;
+        _view = View.Lobby;
+        StateHasChanged();
+        await LoadHistory();
+        await RefreshAvatarState();
+    }
+
+    private async Task LoadHistory()
+    {
+        var result = await Games.GetHistoryAsync(Session.PlayerId);
+        _history = result.IsSuccess ? result.Value : null;
+        StateHasChanged();
+    }
+
+    // ---- Profile: avatar + export ----
+    private string? _avatarUrl;
+
+    private string ProfileInitial =>
+        string.IsNullOrWhiteSpace(Session.DisplayName) ? "?" : Session.DisplayName[..1].ToUpperInvariant();
+
+    private async Task RefreshAvatarState()
+    {
+        var result = await Avatars.GetAvatarUrlAsync(Session.PlayerId);
+        _avatarUrl = result.IsSuccess ? result.Value : null;
+        StateHasChanged();
+    }
+
+    private async Task UploadAvatar(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 512 * 1024);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            var result = await Avatars.SetAvatarAsync(Session.PlayerId, buffer.ToArray(), e.File.ContentType);
+            if (result.IsFailed) { _error = result.Errors[0].Message; }
+            else { _avatarUrl = result.Value; }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not upload avatar: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ExportHistory()
+    {
+        if (_history is not { Count: > 0 }) { return; }
+        var csv = HistoryCsvExporter.ToCsv(_history);
+        await JS.InvokeVoidAsync("downloadTextFile", "gbfs-quiz-history.csv", "text/csv", csv);
+    }
+
+    private async Task StartGame()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Games.StartAsync(Session.PlayerId);
+            if (result.IsFailed)
+            {
+                _error = result.Errors[0].Message;
+                return;
+            }
+
+            var game = result.Value;
+            _gameId = game.GameId;
+            _endsAt = game.EndsAtUtc;
+            _score = game.Score;
+            _finishing = false;
+            ShowQuestion(game.Question);
+            _view = View.Game;
+            StartTimer();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ShowQuestion(QuestionResponse question)
+    {
+        _question = question;
+        _answered = false;
+        _answeredChoiceId = null;
+        _correctChoiceId = null;
+        _lastCorrect = false;
+        _feedback = null;
+    }
+
+    private async Task SubmitAnswer(Guid choiceId)
+    {
+        if (_answered || _question is null) { return; }
+
+        _answered = true;
+        _answeredChoiceId = choiceId;
+        StateHasChanged();
+
+        var result = await Games.SubmitAnswerAsync(Session.PlayerId, _gameId, _question.Id, choiceId);
+        if (result.IsFailed)
+        {
+            _feedback = result.Errors[0].Message;
+            _lastCorrect = false;
+            StateHasChanged();
+            return;
+        }
+
+        var answer = result.Value;
+        _score = answer.Score;
+        _lastCorrect = answer.Correct;
+        _correctChoiceId = answer.CorrectChoiceId;
+        _feedback = answer.Correct ? "Correct! +50" : "Wrong! −20";
+        StateHasChanged();
+
+        if (answer.GameOver)
+        {
+            await FinishGame();
+        }
+        else if (answer.NextQuestion is not null)
+        {
+            await Task.Delay(700);
+            ShowQuestion(answer.NextQuestion);
+            StateHasChanged();
+        }
+    }
+
+    private async Task FinishGame()
+    {
+        if (_finishing) { return; }
+        _finishing = true;
+        StopTimer();
+
+        var result = await Games.FinishAsync(Session.PlayerId, _gameId);
+        if (result.IsSuccess)
+        {
+            _summary = result.Value;
+            _view = View.Result;
+            StateHasChanged();
+            await LoadHistory();
+        }
+        else
+        {
+            _error = result.Errors[0].Message;
+            await EnterLobby();
+        }
+    }
+
+    private GameSummaryResponse? _summary;
+
+    private Variant ChoiceVariant(Guid choiceId) =>
+        _answered && (choiceId == _correctChoiceId || choiceId == _answeredChoiceId)
+            ? Variant.Filled
+            : Variant.Outlined;
+
+    private Color ChoiceColor(Guid choiceId)
+    {
+        if (!_answered) { return Color.Default; }
+        if (choiceId == _correctChoiceId) { return Color.Success; }
+        if (choiceId == _answeredChoiceId && !_lastCorrect) { return Color.Error; }
+        return Color.Default;
+    }
+
+    // ---- Timer ----
+    private void StartTimer()
+    {
+        StopTimer();
+        _secondsRemaining = Math.Max(0, (int)Math.Round((_endsAt - DateTimeOffset.UtcNow).TotalSeconds));
+        _timer = new System.Timers.Timer(1000) { AutoReset = true };
+        _timer.Elapsed += (_, _) => InvokeAsync(Tick);
+        _timer.Start();
+    }
+
+    private async Task Tick()
+    {
+        _secondsRemaining = Math.Max(0, (int)Math.Round((_endsAt - DateTimeOffset.UtcNow).TotalSeconds));
+        if (_secondsRemaining <= 0)
+        {
+            await FinishGame();
+        }
+        StateHasChanged();
+    }
+
+    private void StopTimer()
+    {
+        _timer?.Stop();
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= OnSessionChanged;
+        StopTimer();
+    }
+}

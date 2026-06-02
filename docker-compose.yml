@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gbfs_quiz_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gbfs_quiz
+    ports:
+      - "5432:5432"
+    volumes:
+      - gbfs_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gbfs_quiz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/GbfsQuiz.Web/Dockerfile
+    container_name: gbfs_quiz_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=gbfs_quiz;Username=postgres;Password=postgres"
+    ports:
+      - "8080:8080"
+
+volumes:
+  gbfs_pgdata:

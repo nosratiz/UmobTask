@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GbfsQuiz.Web/GbfsQuiz.Web.csproj" />
+    <Project Path="src/GbfsQuiz.Application/GbfsQuiz.Application.csproj" />
+    <Project Path="src/GbfsQuiz.Domain/GbfsQuiz.Domain.csproj" />
+    <Project Path="src/GbfsQuiz.Infrastructure/GbfsQuiz.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GbfsQuiz.Tests/GbfsQuiz.Tests.csproj" />
+  </Folder>
+</Solution>

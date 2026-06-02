@@ -1,0 +1,52 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject PlayerSession Session
+@inject ProtectedLocalStorage Storage
+
+<MudThemeProvider Theme="@_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Color="Color.Transparent">
+        <MudText Typo="Typo.h5">🚲 GBFS Quiz</MudText>
+        <MudSpacer />
+        @if (Session.IsAuthenticated)
+        {
+            <MudText Typo="Typo.body2" Class="mr-3">Hi, @Session.DisplayName</MudText>
+            <MudButton Variant="Variant.Text" Color="Color.Inherit" OnClick="LogOut">Log out</MudButton>
+        }
+    </MudAppBar>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Small" Class="mt-8">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#38bdf8",
+            Secondary = "#22c55e",
+            Background = "#0f172a",
+            Surface = "#1e293b",
+            AppbarBackground = "#0f172a",
+        }
+    };
+
+    protected override void OnInitialized() => Session.Changed += OnSessionChanged;
+
+    private void OnSessionChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task LogOut()
+    {
+        await Storage.DeleteAsync("gbfs_session");
+        Session.SignOut();
+    }
+
+    public void Dispose() => Session.Changed -= OnSessionChanged;
+}

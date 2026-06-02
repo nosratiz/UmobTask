@@ -1,0 +1,33 @@
+# Render.com Blueprint — one-click deploy of the GBFS Quiz web app.
+# Database: a free Neon Postgres (neon.tech), set manually — Render's own free Postgres
+# expires after 30 days, so we use Neon for a durable free DB.
+#
+# Deploy:
+#   1. Create a Neon project (neon.tech) and copy its POOLED connection string, e.g.
+#      postgresql://USER:PASSWORD@ep-xxx-pooler.REGION.aws.neon.tech/DBNAME?sslmode=require
+#   2. Push this repo to GitHub.
+#   3. Render → "New > Blueprint", point at this repo.
+#   4. When prompted, paste the Neon string into ConnectionStrings__Default.
+# PostgresConnectionString.Normalize converts that postgresql:// URI (incl. sslmode=require)
+# to Npgsql's key/value form at startup — no code change needed.
+services:
+  - type: web
+    name: gbfs-quiz
+    runtime: docker
+    plan: free
+    dockerfilePath: ./src/GbfsQuiz.Web/Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:8080
+      - key: PORT
+        value: 8080
+      # Neon postgresql:// URI — paste in the Render dashboard on first deploy (sync: false
+      # keeps the secret out of git). Normalize() handles the URI + SSL conversion.
+      - key: ConnectionStrings__Default
+        sync: false
+      - key: Jwt__SigningKey
+        generateValue: true

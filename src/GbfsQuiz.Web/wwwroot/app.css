@@ -1,0 +1,28 @@
+html, body {
+    margin: 0;
+    background: radial-gradient(circle at top, #1e293b, #0f172a);
+    min-height: 100vh;
+}
+
+.gap-2 { gap: 8px; }
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1100;
+    padding: 12px 20px;
+    background: #b91c1c;
+    color: #fff;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, .4);
+}
+
+#blazor-error-ui .reload,
+#blazor-error-ui .dismiss {
+    color: #fff;
+    margin-left: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+}

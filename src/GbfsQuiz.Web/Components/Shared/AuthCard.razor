@@ -1,0 +1,120 @@
+@inject IAuthService Auth
+@inject PlayerSession Session
+@inject ProtectedLocalStorage Storage
+
+<MudCard Elevation="4" Class="pa-2">
+    <MudCardContent>
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true"
+                 @bind-ActivePanelIndex="_tab">
+            <MudTabPanel Text="Log in">
+                <MudForm @ref="_loginForm">
+                    <MudTextField @bind-Value="_loginUsername" Label="Username"
+                                  Required="true" RequiredError="Username is required."
+                                  UserAttributes="@(new() { ["autocomplete"] = "username" })" />
+                    <MudTextField @bind-Value="_loginPassword" Label="Password"
+                                  InputType="InputType.Password" Required="true"
+                                  RequiredError="Password is required." Class="mt-3"
+                                  UserAttributes="@(new() { ["autocomplete"] = "current-password" })" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                               Class="mt-6" Disabled="_busy" OnClick="LogIn">
+                        @if (_busy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                        else { <text>Log in</text> }
+                    </MudButton>
+                </MudForm>
+            </MudTabPanel>
+            <MudTabPanel Text="Create account">
+                <MudForm @ref="_registerForm">
+                    <MudTextField @bind-Value="_regUsername" Label="Username (min 3)"
+                                  Required="true" RequiredError="Username is required."
+                                  Validation="@(new Func<string, string?>(ValidateUsername))"
+                                  UserAttributes="@(new() { ["autocomplete"] = "username" })" />
+                    <MudTextField @bind-Value="_regDisplay" Label="Display name (optional)" Class="mt-3" />
+                    <MudTextField @bind-Value="_regPassword" Label="Password (min 8)"
+                                  InputType="InputType.Password" Required="true"
+                                  RequiredError="Password is required."
+                                  Validation="@(new Func<string, string?>(ValidatePassword))" Class="mt-3"
+                                  UserAttributes="@(new() { ["autocomplete"] = "new-password" })" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                               Class="mt-6" Disabled="_busy" OnClick="Register">
+                        @if (_busy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                        else { <text>Create account &amp; play</text> }
+                    </MudButton>
+                </MudForm>
+            </MudTabPanel>
+        </MudTabs>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-4" Dense="true">@_error</MudAlert>
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter] public EventCallback OnAuthenticated { get; set; }
+
+    private int _tab;
+    private bool _busy;
+    private string? _error;
+
+    private MudForm _loginForm = null!;
+    private MudForm _registerForm = null!;
+
+    private string _loginUsername = string.Empty;
+    private string _loginPassword = string.Empty;
+    private string _regUsername = string.Empty;
+    private string _regDisplay = string.Empty;
+    private string _regPassword = string.Empty;
+
+    private static string? ValidateUsername(string value) =>
+        string.IsNullOrWhiteSpace(value) || value.Trim().Length < 3
+            ? "Username must be at least 3 characters."
+            : null;
+
+    private static string? ValidatePassword(string value) =>
+        string.IsNullOrEmpty(value) || value.Length < 8
+            ? "Password must be at least 8 characters."
+            : null;
+
+    private async Task LogIn()
+    {
+        await _loginForm.ValidateAsync();
+        if (!_loginForm.IsValid) { return; }
+
+        await Authenticate(() => Auth.LoginAsync(_loginUsername.Trim(), _loginPassword));
+    }
+
+    private async Task Register()
+    {
+        await _registerForm.ValidateAsync();
+        if (!_registerForm.IsValid) { return; }
+
+        await Authenticate(() => Auth.RegisterAsync(_regUsername.Trim(), _regDisplay.Trim(), _regPassword));
+    }
+
+    private async Task Authenticate(
+        Func<Task<FluentResults.Result<GbfsQuiz.Application.Features.Auth.Responses.AuthResponse>>> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var result = await action();
+            if (result.IsFailed)
+            {
+                _error = result.Errors[0].Message;
+                return;
+            }
+
+            var auth = result.Value;
+            var displayName = string.IsNullOrWhiteSpace(auth.DisplayName) ? auth.Username : auth.DisplayName;
+            await Storage.SetAsync("gbfs_session", new StoredSession(auth.PlayerId, displayName));
+            Session.SignIn(auth.PlayerId, displayName);
+            await OnAuthenticated.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,57 @@
+@inject ILeaderboardService LeaderboardService
+
+<MudPaper Class="pa-4 mt-4" Elevation="2">
+    <MudText Typo="Typo.h6" GutterBottom="true">🏆 Leaderboard</MudText>
+
+    @if (_entries is null)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Default">Loading…</MudText>
+    }
+    else if (_entries.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Default">No finished games yet — be the first!</MudText>
+    }
+    else
+    {
+        <MudList T="LeaderboardEntryResponse" Dense="true">
+            @foreach (var entry in _entries)
+            {
+                <MudListItem T="LeaderboardEntryResponse">
+                    <div class="d-flex align-center gap-3" style="width:100%">
+                        <MudText Typo="Typo.body2" Style="width:24px">@entry.Rank.</MudText>
+                        <MudAvatar Size="Size.Small" Color="Color.Primary">
+                            @if (entry.HasAvatar)
+                            {
+                                <MudImage Src="@($"/api/players/{entry.PlayerId}/avatar")" />
+                            }
+                            else
+                            {
+                                @Initial(entry.DisplayName)
+                            }
+                        </MudAvatar>
+                        <MudText Typo="Typo.body2" Class="flex-grow-1">@entry.DisplayName</MudText>
+                        <MudText Typo="Typo.body2"><strong>@entry.BestScore</strong></MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                            @entry.GamesWon W / @entry.GamesPlayed
+                        </MudChip>
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<LeaderboardEntryResponse>? _entries;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The repository creates its own short-lived DbContext per call (via the
+        // factory), so this read never races the parent page's queries.
+        var result = await LeaderboardService.GetTopAsync(10);
+        _entries = result.IsSuccess ? result.Value : Array.Empty<LeaderboardEntryResponse>();
+    }
+
+    private static string Initial(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "?" : name[..1].ToUpperInvariant();
+}
